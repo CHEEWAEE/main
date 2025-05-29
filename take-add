@@ -1,0 +1,78 @@
+#!/bin/dash
+
+# take-add: Creates a new assignment directory in the `.take` system.
+# 
+# Usage: take-add <assignment> <solution> <supplied> <marking>
+#
+# - Validates the assignment name (must contain only letters, numbers, and `_`).
+# - Ensures the `.take` directory exists.
+# - Prevents duplicate assignments from being created.
+# - Verifies that all provided files exist before copying them.
+# - Creates a new directory for the assignment inside `.take/`.
+# - Copies the provided files into the assignment directory.
+# - Records the assignment in `.take/assignments.list` for tracking.
+# - Stores metadata (`name` and `created timestamp`) in `.info` inside the assignment folder.
+#
+#
+# Written by William Chhour (z5585071)
+# On 16/3/2025
+
+####################################################################################################
+
+# Argument check
+if [ "$#" -ne 4 ]; then
+    echo "usage: take-add <assignment> <solution> <supplied> <marking>" >&2
+    exit 1
+fi
+
+assignment_name="$1"
+shift
+
+# Grep -q (quiet) to detect if assignment name has invalid characters
+if ! echo "$assignment_name" | grep -Eq '^[a-z][a-zA-Z0-9_]*$'; then
+    echo "take-add: invalid assignment: $assignment_name" >&2
+    exit 1
+fi
+
+# -d checks if the directory named ".take" exists and if not, creates it
+if [ ! -d ".take" ]; then
+    mkdir ".take"
+    echo "directory .take created"
+fi
+
+# Assignment_dir is a string that stores the directory of the assignment
+assignment_dir=".take/$assignment_name"
+
+# if there is a directory already named what user tried to input, throw error
+if [ -d "$assignment_dir" ]; then
+    echo "take-add: assignment $assignment_name already exists" >&2
+    exit 1
+fi
+
+# Loop through all arguments and ensure they exist
+for file in "$@"; do
+    if [ ! -f "$file" ]; then
+        echo "take-add: $file: No such file or directory" >&2
+        exit 1
+    fi
+done
+
+# Make assignment directory
+mkdir -p "$assignment_dir"
+
+# Copy all remaining arguments into the directory
+cp "$@" "$assignment_dir/"
+
+# Append the assignment name to assignments.list (>> means append whilst > overwrites)
+echo "$assignment_name" >> .take/assignments.list
+
+# Create a hidden .info file and append name = $assignment name in it (stored data)
+echo "name=$assignment_name" > "$assignment_dir/.info"
+
+# Append the date to the hidden .info file in the assignment folder
+echo "created=$(date +"%Y-%m-%d %H:%M:%S")" >> "$assignment_dir/.info"
+
+# Print success message to stdout
+echo "assignment $assignment_name created"
+
+exit 0

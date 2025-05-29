@@ -1,0 +1,73 @@
+#!/bin/dash
+# take-status: Displays submission details for a specific student (`zid`) in the `.take` system.
+# Usage: take-status <zid>
+# - Checks if the `.take/` directory exists.
+# - Searches all assignments in `.take/` for submissions from the given `zid`.
+# - If submissions exist, lists the number of submissions and their details.
+# - If no submissions are found, prints "no submissions for <zid>".
+# Exits with 1 on errors, 0 if no submissions exist.
+#
+# Written by William Chhour (z5585071)
+# On 17/3/2025
+
+####################################################################################################
+
+# Argument check
+if [ "$#" -ne 1 ]; then
+    echo "Usage: take-status <zid>" >&2
+    exit 1
+fi
+
+# Variable (zid) equal to 1st argument
+zid="$1"
+
+# If take directory doesnt exist
+if [ ! -d ".take" ]; then
+    echo "no submissions for $zid"
+    exit 0
+fi
+
+# Variable (found) intialised to 0 (FALSE)
+found=0
+
+# For loop intialising a variable too be equal to ANY assignment folder (* is anything)
+for assignment in .take/*/submissions; do
+    # Once we a submission directory in the variable assignment, we can add the zid to get a submission directory
+    submissions_dir="$assignment/$zid"
+
+    # If it doesn't exist continue
+    if [ ! -d "$submissions_dir" ]; then
+        continue
+    fi
+    
+    # Since the folder exists set found to 1 (TRUE)
+    found=1
+
+    # Submission count is the amount of lines in the students metadata folder
+    submission_count=$(wc -l < "$submissions_dir/.metadata")
+
+    # Print the submission count for a specific assignment
+    echo "* $submission_count submissions for $(basename "$(dirname "$assignment")")"
+
+    # If statement checking if there is a metadata folder
+    if [ -f "$submissions_dir/.metadata" ]; then
+        # Read each line of metadata and set the variable to "metadata_line"
+        while IFS= read -r metadata_line; do
+            # Extract information needed from each line in metadata using cut
+            submission_number=$(echo "$metadata_line" | cut -d' ' -f1)
+            submission=$(echo "$metadata_line" | cut -d' ' -f2)
+            file_size=$(echo "$metadata_line" | cut -d' ' -f3)
+            timestamp=$(echo "$metadata_line" | cut -d' ' -f4-)
+
+            # Print message to stdout
+            echo "submission $submission_number: $submission $file_size bytes @ $timestamp"
+        done < "$submissions_dir/.metadata"     # Directory where while loop begins
+    fi
+done
+
+# If found remained false for entire program, print message where no program was found
+if [ "$found" -eq 0 ]; then
+    echo "no submissions for $zid"
+fi
+
+exit 0

@@ -1,0 +1,47 @@
+#!/bin/dash
+
+# take-summary: Displays the number of student submissions for each assignment in the `.take` system.
+# Usage: take-summary
+# - Checks if the `.take/` directory exists.
+# - Iterates through all assignments in `.take/`.
+# - Counts how many students have submitted for each assignment.
+# - Outputs the submission count for each assignment.
+# Exits with 0 if no assignments exist.
+#
+#
+# Written by William Chhour (z5585071)
+# On 16/3/2025
+
+####################################################################################################
+
+# If hidden .take directory doesn't exist
+if [ ! -d ".take" ]; then
+    echo "no assignments"
+    exit 0
+fi
+
+# If directory exists but assignments.list doesnt exist
+if [ ! -f ".take/assignments.list" ]; then
+    echo "no assignments"
+    exit 0
+fi
+
+if [ ! -s ".take/assignments.list" ]; then
+    echo "no assignments"
+    exit 0
+fi
+
+# Repeatedly read from assignments.list and set the variable to be "assignment"
+while IFS= read -r assignment; do
+    # Set submission count variable to be 0 at start of loop
+    submission_count=0
+    # The directory for our given assignment exists enter if statement
+    if [ -d ".take/$assignment/submissions" ]; then
+        # Use find to output all the folders/directories in the submissions folders then use wc -l to count them
+        submission_count=$(find ".take/$assignment/submissions" -mindepth 1 -maxdepth 1 -type d | wc -l)
+    fi
+    # Print success statement to stdout
+    echo "assignment $assignment: submissions from $submission_count students"
+done < ".take/assignments.list"     # This makes the while loop read from ./take/assignments.list
+
+exit 0

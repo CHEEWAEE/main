@@ -1,0 +1,57 @@
+#!/bin/dash
+# take-rm: Removes an assignment from the .take system.
+#
+# Usage: take-rm <assignment>
+#
+# It deletes the assignment directory (.take/<assignment>) and removes its name from .take/assignments.list.
+# If the assignments list becomes empty, it prints "no assignments".
+#
+# Written by William Chhour (z5585071)
+# On 23/3/2025
+
+# Check argument count
+if [ "$#" -ne 1 ]; then
+    echo "usage: take-rm <assignment>" >&2
+    exit 1
+fi
+
+assignment="$1"
+
+# Validate assignment name
+if ! echo "$assignment" | grep -Eq '^[a-z][a-zA-Z0-9_]*$'; then
+    echo "take-rm: invalid assignment name '$assignment'" >&2
+    exit 1
+fi
+
+# Check if the .take directory exists
+if [ ! -d ".take" ]; then
+    echo "take-rm: .take directory does not exist" >&2
+    exit 1
+fi
+
+assignment_dir=".take/$assignment"
+
+# Check if the assignment exists
+if [ ! -d "$assignment_dir" ]; then
+    echo "take-rm: assignment '$assignment' not found" >&2
+    exit 1
+fi
+
+# Remove the assignment directory
+rm -rf "$assignment_dir"
+
+# Update assignments.list if it exists
+assignments_list=".take/assignments.list"
+if [ -f "$assignments_list" ]; then
+    # Remove any line that exactly matches the assignment name
+    sed "/^$assignment$/d" "$assignments_list" > "$assignments_list.tmp" && mv "$assignments_list.tmp" "$assignments_list"
+    # If the assignments list exists but is now empty, remove it
+    if [ ! -s "$assignments_list" ]; then
+        rm -f "$assignments_list"
+        echo "assignment $assignment removed"
+        exit 0
+    fi
+fi
+
+echo "assignment $assignment removed"
+exit 0

@@ -1,0 +1,197 @@
+#!/bin/dash
+# take-mark: Runs marking tests for an assignment on the last submission of each student.
+# Usage: take-mark <assignment>
+#
+# Marking test files have 5 columns separated by '|' characters:
+#   1. Test label (must start with a lowercase letter, followed by letters, digits, or underscores)
+#   2. Arguments (allowed: letters, digits, underscore, dash, dot; multiple arguments separated by spaces)
+#   3. Standard input (allowed: non-white-space ASCII plus spaces; "\n" represents a newline; '\' only appears before n; no pipes)
+#   4. Test options (zero or more of [bcdw])
+#   5. Marks (a non-negative integer)
+#
+# For each student (a subdirectory in .take/<assignment>/submissions named with a zID, e.g. z7777777),
+# this script finds the last submission file (based on the numeric prefix in the filename) and runs every marking test on it.
+# It prints details for each test (including differences if the test fails) and prints a final summary.
+# A summary of marks is stored in .take/<assignment>/marks.txt.
+#
+# Written by William Chhour (z5585071)
+# On 17/3/2025
+
+# Check argument count
+if [ "$#" -ne 1 ]; then
+    echo "usage: take-mark <assignment>" >&2
+    exit 1
+fi
+
+assignment="$1"
+
+# Validate assignment name
+if ! echo "$assignment" | grep -Eq '^[a-z][a-zA-Z0-9_]*$'; then
+    echo "take-mark: invalid assignment name '$assignment'" >&2
+    exit 1
+fi
+
+assignment_dir=".take/$assignment"
+if [ ! -d "$assignment_dir" ]; then
+    echo "take-mark: assignment '$assignment' not found" >&2
+    exit 1
+fi
+
+# Initialise mark file (it ends with .marking)
+mark_file=$(find "$assignment_dir" -maxdepth 1 -type f -name "*.marking" 2>/dev/null | head -n 1)
+if [ -z "$mark_file" ]; then
+    echo "take-mark: marking test file not found for assignment '$assignment'" >&2
+    exit 1
+fi
+
+# Initialise mark file (assumed solution is either a script or a python/c program)
+ref_solution=$(find "$assignment_dir" -maxdepth 1 -type f \( -name "*.sh" -o -name "*.py" -o -name "*.c" \) 2>/dev/null | head -n 1)
+if [ -z "$ref_solution" ]; then
+    echo "take-mark: reference solution not found for assignment '$assignment'" >&2
+    exit 1
+fi
+
+# Calculate total available marks from the marking test file
+total_marks=0
+while IFS='|' read -r label args stdin options marks; do
+    [ -z "$label" ] && continue
+    echo "$label" | grep -q '^#' && continue
+    total_marks=$(( total_marks + marks ))
+done < "$mark_file"
+
+# Prepare temporary files to capture outputs
+temp_stdout=$(mktemp)
+temp_stderr=$(mktemp)
+ref_stdout=$(mktemp)
+ref_stderr=$(mktemp)
+
+# Prepare file to store final marks summary
+marks_file="$assignment_dir/marks.txt"
+
+# Prepare submission directory
+submissions_dir="$assignment_dir/submissions"
+if [ ! -d "$submissions_dir" ]; then
+    echo "take-mark: No submissions directory found for assignment '$assignment'" >&2
+    exit 1
+fi
+
+# Iterate over student directories inside the submissions directory
+for student_dir in "$submissions_dir"/z[0-9][0-9][0-9][0-9][0-9][0-9][0-9]; do
+    [ ! -d "$student_dir" ] && continue
+    student=$(basename "$student_dir")
+    
+    # Find the submission file with the highest numeric prefix
+    last_submission=$(find "$student_dir" -type f | sort -t'_' -k1,1n | tail -n 1)
+    if [ -z "$last_submission" ]; then
+        echo "Student $student: No submission found." 
+        echo "Student $student: 0/$total_marks" >> "$marks_file"
+        continue
+    fi
+    
+    # Use metadate file to get data of latest submission
+    meta_file="$student_dir/.metadata"
+    meta_line=$(tail -n 1 "$meta_file")
+
+    # Parse metadata using cut
+    submission_num=$(echo "$meta_line" | cut -d' ' -f1)
+    raw_filename=$(echo "$meta_line" | cut -d' ' -f2)
+    file_size=$(echo "$meta_line" | cut -d' ' -f3)
+    mod_time=$(echo "$meta_line" | cut -d' ' -f4-)
+
+    # Remove numeric prefix for display
+    submission_name=$(echo "$raw_filename" | sed -E 's/^[0-9]+_//')
+
+    echo "*** Student $student - submission $submission_num: $submission_name $file_size bytes @ $mod_time"
+
+    student_score=0
+    test_pass_count=0
+    test_fail_count=0
+
+    # Process each marking test from the marking file
+    while IFS='|' read -r label args test_input options marks; do
+        # Skip empty or comment lines
+        [ -z "$label" ] && continue
+        echo "$label" | grep -q '^#' && continue
+
+        # Validate test label
+        if ! echo "$label" | grep -Eq '^[a-z][a-zA-Z0-9_]*$'; then
+            echo "take-mark: invalid test label '$label'" >&2
+            continue
+        fi
+
+        # Replace literal "\n" with actual newline characters in test input
+        test_input=$(echo "$test_input" | sed 's/\\n/\n/g')
+
+        # Set diff options based on test options
+        diff_options=""
+        echo "$options" | grep -q "b" && diff_options="$diff_options -B"
+        echo "$options" | grep -q "c" && diff_options="$diff_options -i"
+        echo "$options" | grep -q "d" && diff_options="$diff_options -w"
+        echo "$options" | grep -q "w" && diff_options="$diff_options -b"
+
+        # Run the student's submission
+        echo "$test_input" | "$last_submission" "$args" > "$temp_stdout" 2>"$temp_stderr"
+        stud_exit=$?
+
+        # Run the reference solution
+        echo "$test_input" | "$ref_solution" "$args" > "$ref_stdout" 2>"$ref_stderr"
+        ref_exit=$?
+
+        test_passed=true
+
+        # Compare exit statuses
+        if [ "$stud_exit" -ne "$ref_exit" ]; then
+            test_passed=false
+            diff_msg="Exit status of $stud_exit incorrect should be $ref_exit"
+        fi
+
+        # Compare stdout
+        if ! diff $diff_options "$temp_stdout" "$ref_stdout" >/dev/null; then
+            test_passed=false
+            stud_stdout_bytes=$(wc -c < "$temp_stdout" | tr -d ' ')
+            ref_stdout_bytes=$(wc -c < "$ref_stdout" | tr -d ' ')
+            stdout_diff_msg="--- Incorrect stdout of $stud_stdout_bytes bytes:
+$(cat "$temp_stdout")
+
+--- Correct stdout is these $ref_stdout_bytes bytes:
+$(cat "$ref_stdout")\n"
+        fi
+
+        # Compare stderr
+        if ! diff $diff_options "$temp_stderr" "$ref_stderr" >/dev/null; then
+            test_passed=false
+            stud_stderr_bytes=$(wc -c < "$temp_stderr" | tr -d ' ')
+            ref_stderr_bytes=$(wc -c < "$ref_stderr" | tr -d ' ')
+            stderr_diff_msg="--- Incorrect stderr of $stud_stderr_bytes bytes:
+$(cat "$temp_stderr")
+
+--- Correct stderr is these $ref_stderr_bytes bytes:
+$(cat "$ref_stderr")"
+        fi
+
+        if $test_passed; then
+            echo "* Test $label passed ($marks marks)."
+            student_score=$(( student_score + marks ))
+            test_pass_count=$(( test_pass_count + 1 ))
+        else
+            echo "* Test $label failed."
+            [ -n "$stdout_diff_msg" ] && echo "$stdout_diff_msg"
+            [ -n "$stderr_diff_msg" ] && echo "$stderr_diff_msg"
+            [ -n "$diff_msg" ] && echo "$diff_msg"
+            test_fail_count=$(( test_fail_count + 1 ))
+        fi
+
+        # Reset diff messages
+        stdout_diff_msg=""
+        stderr_diff_msg=""
+        diff_msg=""
+    done < "$mark_file"
+
+    echo "** $test_pass_count tests passed, $test_fail_count tests failed - mark: $student_score/$total_marks"
+    echo "Student $student: $student_score/$total_marks" >> "$marks_file"
+done
+
+# Clean up temporary files
+rm "$temp_stdout" "$temp_stderr" "$ref_stdout" "$ref_stderr"
+
+exit 0

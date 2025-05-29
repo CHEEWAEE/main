@@ -1,0 +1,146 @@
+#!/bin/dash
+# take-test: Runs tests for a given assignment by comparing program output with reference solution.
+# Usage: take-test <assignment> <program>
+# - Validates the assignment name and program file.
+# - Finds the corresponding test file (.supplied) for the assignment.
+# - Ensures the program is executable.
+# - Runs the program with the test cases and compares its output to the reference solution.
+# - Reports the number of tests passed and failed, showing output differences for failing tests.
+# Exits with 1 on errors.
+#
+# Written by William Chhour (z5585071)
+# On 17/3/2025
+
+####################################################################################################
+
+# Argument check
+if [ "$#" -ne 2 ]; then
+    echo "usage: take-test <assignment> <filename>" >&2
+    exit 1
+fi
+
+# Assign variables
+assignment="$1"
+program="$2"
+
+# If program name is invalid throw error
+if echo "$program" | grep -Eq '[^a-zA-Z0-9._/-]'; then
+    echo "take-test: invalid filename '$program'" >&2
+    exit 1
+fi
+
+# Initialise new variable test_file with the known ending of the name (.supplied) 
+# This also hides the error from find since it was causing incorrect output, its redirected to stderr
+test_file=$(find .take/"$assignment" -type f -name "*.supplied" 2>/dev/null | head -n 1)
+
+# If test file doesnt exist throw error
+if [ -z "$test_file" ]; then
+    echo "take-test: assignment $assignment not found" >&2
+    exit 1
+fi
+
+# If the program user is trying to enter doesnt exist throw error (-x since it also has to be executable)
+if [ ! -x "$program" ]; then
+    echo "take-test: $program: No such file or not executable" >&2
+    exit 1
+fi
+
+# Initialise new variable named reference solution (Assumes the assignments are either sh py or c)
+ref_solution=$(find .take/"$assignment" -type f \( -name "*.sh" -o -name "*.py" -o -name "*.c" \) | head -n 1)
+
+# If reference solution doesnt exist throw error
+if [ -z "$ref_solution" ]; then
+    echo "take-test: reference solution not found for '$assignment'" >&2
+    exit 1
+fi
+
+# Use mktemp to make 4 temporary files
+stdout_file=$(mktemp)
+stderr_file=$(mktemp)
+expected_stdout=$(mktemp)
+expected_stderr=$(mktemp)
+
+# Initialise counters (Final echo needs to print how much tests we passed and failed)
+pass_count=0
+fail_count=0
+
+# Read each line in the .supplied file and set variables to each part
+# Remember test is formatted like 
+# test1|--flag1 --flag2|input text|b
+while IFS='|' read -r label args stdin options; do
+    # Just in case there is empty lines or comments in .supplied, skip them
+    if echo "$label" | grep -q '^#' || [ -z "$label" ]; then
+        continue
+    fi
+
+    # Ensure label doesnt have invalid characters
+    if ! echo "$label" | grep -Eq '^[a-z][a-zA-Z0-9_]*$'; then
+        echo "take-test: invalid test label '$label'" >&2
+        continue
+    fi
+
+    # Replace literal "\\n" escape sequences in the input with actual newline characters
+    stdin=$(echo "$stdin" | sed 's/\\n/\n/g')
+
+    # Pass standard input into our program and store it in stdout
+    echo "$stdin" | ./"$program" "$args" >"$stdout_file" 2>"$stderr_file"
+    exit_status=$?
+
+    # Do the same for our example solution
+    echo "$stdin" | "$ref_solution" "$args" >"$expected_stdout" 2>"$expected_stderr"
+    expected_exit_status=$?
+
+    # If the exit statuses are not equal count test as fail
+    if [ "$exit_status" -ne "$expected_exit_status" ]; then
+        echo "* Test $label failed."
+        fail_count=$((fail_count + 1))
+        continue
+    fi
+    # Initialise a new variable called diff_options
+    diff_options=""
+    
+    # Grep options to identify which one is wanted
+    # If grep quiet returns one append diff options and add the unique option cases
+    echo "$options" | grep -q "b" && diff_options="$diff_options -B"
+    echo "$options" | grep -q "c" && diff_options="$diff_options -i"
+    echo "$options" | grep -q "d" && diff_options="$diff_options -w"
+    echo "$options" | grep -q "w" && diff_options="$diff_options -b"
+
+    # Run diff with the options and compare the outputs if failed enter if statement
+    if ! diff $diff_options "$stdout_file" "$expected_stdout" >/dev/null; then
+        echo "* Test $label failed."
+        fail_count=$((fail_count + 1))
+
+        incorrect_output=$(cat "$stdout_file")
+        correct_output=$(cat "$expected_stdout")
+        incorrect_bytes=$(wc -c < "$stdout_file" | tr -d ' ')
+        correct_bytes=$(wc -c < "$expected_stdout" | tr -d ' ')
+
+        echo "--- Incorrect stdout of $incorrect_bytes bytes:"
+        echo "$incorrect_output"
+        echo
+        echo "--- Correct stdout is these $correct_bytes bytes:"
+        echo "$correct_output"
+        echo
+        continue
+    fi
+
+    # Run diff with the options and compare the error codes if different enter if statement
+    if ! diff "$stderr_file" "$expected_stderr" >/dev/null; then
+        echo "* Test $label failed."
+        fail_count=$((fail_count + 1))
+        continue
+    fi
+
+    # If none failed print pass and add 1 to pass counter
+    echo "* Test $label passed."
+    pass_count=$((pass_count + 1))
+done <"$test_file"
+
+# Print final results
+echo "** $pass_count tests passed, $fail_count tests failed"
+
+# Remove temporary files
+rm "$stdout_file" "$stderr_file" "$expected_stdout" "$expected_stderr"
+
+exit 0

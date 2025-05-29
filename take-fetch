@@ -1,0 +1,86 @@
+#!/bin/dash
+# take-fetch: Retrieves a specific submission file for a student (`zid`) in the `.take` system.
+# Usage: take-fetch <assignment> <zid> [n]
+# - Validates the assignment name, `zid` format, and optional submission number `n`.
+# - Ensures the student has submissions for the given assignment.
+# - If `n` is negative, it fetches from the most recent submissions.
+# - Retrieves and prints the requested submission file.
+# Exits with 1 on errors.
+#
+# Written by William Chhour (z5585071)
+# On 17/3/2025
+
+####################################################################################################
+
+# Argument check
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+    echo "usage: take-fetch <assignment> <zid> [n]" >&2
+    exit 1
+fi
+
+# Assign variables
+assignment="$1"
+zid="$2"
+
+# n is the OPTIONAL third variable, if n is not provided, set it to 0
+if [ -z "$3" ]; then
+    n=0
+else
+    n="$3"
+fi
+
+# Use grep to ensure that zid is valid (z and then integers)
+if echo "$zid" | grep -qE '^z[0-9]$'; then
+    echo "take-fetch: invalid zid: $zid" >&2
+    exit 1
+fi
+
+# Initialise new variable to be the submission directory of the given zid
+submissions_dir=".take/$assignment/submissions/$zid"
+
+# If it doesnt exist throw error
+if [ ! -d "$submissions_dir" ]; then
+    echo "take-fetch: no submissions for $zid in $assignment" >&2
+    exit 1
+fi
+
+# Count the number of submissions in the directory (grep to only count submissions)
+# In my program each submission is renamed to n_"submission" where n is the submission number
+total_submissions=$(ls "$submissions_dir" | grep -Ec '^[0-9]+_')
+
+# If there is none found
+if [ "$total_submissions" -eq 0 ]; then
+    echo "take-fetch: no submissions for $zid in $assignment" >&2
+    exit 1
+fi
+
+# Ensure that n is a valid number e.g 1,2,10,100,-1,-5
+if echo "$n" | grep -Eq '[^0-9-]'; then
+    echo "take-fetch: invalid submission number '$n'" >&2
+    exit 1
+fi
+
+# If n is a negative number start from the end and go back (negative indexes)
+if [ "$n" -le 0 ]; then
+    n=$((total_submissions + n))
+fi
+
+# Ensure n is still a valid submission number before proceeding ( 1 <= n <= total_submissions )
+if [ "$n" -lt 1 ] || [ "$n" -gt "$total_submissions" ]; then
+    echo "take-fetch: submission $n not found for $assignment" >&2
+    exit 1
+fi
+
+# Use n and grep to get the desired submission number
+submission_file=$(ls "$submissions_dir" | grep -E "^${n}_" | head -n 1)
+
+# If submission file is empty throw an error
+if [ -z "$submission_file" ]; then
+    echo "take-fetch: submission $n not found for $assignment" >&2
+    exit 1
+fi
+
+# If not empty print contents of the submission
+cat "$submissions_dir/$submission_file"
+
+exit 0

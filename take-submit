@@ -1,0 +1,81 @@
+#!/bin/dash
+
+# take-submit: Submits a file for an assignment in the `.take` system.
+# Usage: take-submit <assignment> <zid> <filename>
+# - Validates the assignment name, zid format, and filename.
+# - Ensures the assignment exists and the file is valid.
+# - Saves the submission in `.take/<assignment>/submissions/<zid>/`.
+# - Numbers each submission and records metadata (size & timestamp).
+# Exits with 1 on errors.
+#
+#
+# Written by William Chhour (z5585071)
+# On 16/3/2025
+
+####################################################################################################
+
+# Ensure arguments are correct amount
+if [ "$#" -ne 3 ]; then
+    echo "usage: take-submit <assignment> <zid> <filename>" >&2
+    exit 1
+fi
+
+# Assign variables to arguments
+assignment="$1"
+zid="$2"
+submission="$3"
+
+# If zid is invalid string throw error (q is quiet grep meaning it doesnt print)
+if ! echo "$zid" | grep -Eq '^z[0-9]{7}$'; then
+    echo "take-submit: invalid zid: $zid" >&2
+    exit 1
+fi
+
+# If the submission is invalid throw error
+if echo "$submission" | grep -Eq '[^a-zA-Z0-9._/-]'; then
+    echo "take-submit: invalid filename '$submission'" >&2
+    exit 1
+fi
+
+# If the assignment doesnt exist throw error
+if [ ! -d ".take/$assignment" ]; then
+    echo "take-submit: assignment $assignment not found" >&2
+    exit 1
+fi
+
+# If the file they're trying to submit doesnt exist throw error
+if [ ! -f "$submission" ]; then
+    echo "take-submit: $submission: No such file or directory" >&2
+    exit 1
+fi
+
+# Make new directory for students submission
+submission_dir=".take/$assignment/submissions/$zid"
+mkdir -p "$submission_dir"
+
+# Make a new file called metadata (stores times and info about submissions)
+if [ ! -f "$submission_dir/.metadata" ]; then
+    touch "$submission_dir/.metadata"
+fi
+
+# Submission count is the amount of lines in metadata
+submission_count=$(wc -l < "$submission_dir/.metadata")
+
+submission_number=$((submission_count + 1))
+
+# Word count char to get bytes
+file_size=$(wc -c < "$submission")
+
+# Use date command to get submission time and format it
+timestamp=$(date +"%a %b %e %H:%M:%S %Y")
+
+# Store the submission in the submission directory and append the number to the start of it e.g 1_solution.sh
+cp "$submission" "$submission_dir/${submission_number}_$submission"
+
+# Store the data in the metadata folder
+echo "$submission_number $submission $file_size $timestamp" >> "$submission_dir/.metadata"
+
+# Print success message
+echo "Submission accepted - submission $submission_number: $submission $file_size bytes @ $timestamp"
+
+exit 0
